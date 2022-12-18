@@ -49,6 +49,7 @@ func getNextByte(s *scanner, b byte) stateFunc {
 			if s.trace {
 				log.Printf("TRACE: [%s] ignoring CR at beginning of job", s.tag)
 			}
+			s.isVM = true
 			s.newjob = true
 			return getNextByte
 		}
@@ -65,13 +66,32 @@ func getNextByte(s *scanner, b byte) stateFunc {
 			// probably from VM ejecting the previous job (since, for some
 			// reason, it doesn't eject jobs right after they finish). We're
 			// already starting on a new page, so we'll just suppress it.
+			// Instead we skip three lines at the top for alignment.
 			if s.trace {
 				log.Printf("TRACE: [%s] ignoring FF at beginning of job", s.tag)
 			}
+			s.isVM = true
+			s.emitLine(true)
+			s.emitLine(true)
+			s.emitLine(true)
 			return getNextByte
 		}
 		s.emitLineAndPage()
 		return getNextByte
+	case 0xFF, 0x9F, 0x07:
+		if wasNewJob {
+			// if the very first byte we receive is 0xFF (or 0x9F or 0x07
+			// depending on Hercules codepage configuration) then
+			// it's probably from VM. We will ignore it and count this
+			// as still being a new job.
+			if s.trace {
+				log.Printf("TRACE: [%s] ignoring 0xFF / 0x9F / 0x07 at beginning of job", s.tag)
+			}
+			s.isVM = true
+			s.newjob = true
+			return getNextByte
+		}
+		fallthrough
 	default:
 		// Add byte to the current line
 		s.curline[s.pos] = b
