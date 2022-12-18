@@ -40,6 +40,14 @@ type scanner struct {
 	newjob   bool
 	trace    bool
 	tag      string
+	isVM     bool
+	linenum  int
+}
+
+type vmJobinfo struct {
+	vmUID    string
+	vmFname  string
+	vmFileid string
 }
 
 // Scan will read from a net.Conn, conn, which should be sent data from
@@ -67,6 +75,7 @@ func ScanWithLogTag(conn net.Conn, handler PrinterHandler, trace bool,
 	s.newjob = true
 	s.trace = trace
 	s.tag = tag
+	s.isVM = false
 
 	nextByte := make([]byte, 1)
 	for {
@@ -113,8 +122,8 @@ func ScanWithLogTag(conn net.Conn, handler PrinterHandler, trace bool,
 func (s *scanner) emitLine(linefeed bool) {
 	// Trace output for the raw line
 	if s.trace {
-		log.Printf("TRACE: [%s] (lf: %v) scanner got line: %s", s.tag,
-			linefeed, hex.EncodeToString(s.curline[:s.pos]))
+		log.Printf("TRACE: [%s] (lf: %v) scanner got line (#%d): %s", s.tag,
+			linefeed, s.linenum, hex.EncodeToString(s.curline[:s.pos]))
 	}
 
 	// We need to build a valid UTF-8 string. For now we'll handle a couple
@@ -148,7 +157,62 @@ func (s *scanner) emitLine(linefeed bool) {
 	s.prevline = string(utf8runes)
 	s.handler.AddLine(s.prevline, linefeed)
 	s.pos = 0
+	if s.isVM {
+		s.matchVmJobinfo()
+	}
+	s.linenum++
 
+}
+
+// This regular expressions matches VM/370 CE 1.2 user ID string
+var vmUseridRegexp = regexp.MustCompile(
+	`(?m) +LOCATION  USERID      VM370CE     (\S+).+`)
+
+// This regular expressions matches VM/370 CE 1.2 file name string
+var vmFilenameRegexp = regexp.MustCompile(
+	`(?m) +SPOOL FILE NAME TYPE  (\S+)\s+(\S*)\s+33.+`)
+
+// This regular expressions matches VM/370 CE 1.2 file ID string
+var vmIdRegexp = regexp.MustCompile(
+	`(?m) +SPOOL FILE ID         (\S+).+`)
+
+var vminfo vmJobinfo
+
+// matchVmJobinfo will match regular expressions for the VM
+// user ID, VM filename and VM file ID and store the matched
+// values in a vmJobinfo structure.
+func (s *scanner) matchVmJobinfo() {
+	var matches []string
+	switch s.linenum {
+	case 76:
+		if vmUseridRegexp.MatchString(s.prevline) {
+			matches = vmUseridRegexp.FindStringSubmatch(s.prevline)
+			if len(matches) > 1 {
+				// get VM userid
+				vminfo.vmUID = matches[1]
+			}
+		}
+	case 82:
+		if vmFilenameRegexp.MatchString(s.prevline) {
+			matches = vmFilenameRegexp.FindStringSubmatch(s.prevline)
+			if len(matches) > 1 {
+				// get VM filename
+				vminfo.vmFname = matches[1]
+			}
+			if len(matches) > 2 && matches[2] != "" {
+				// get VM file name
+				vminfo.vmFname = vminfo.vmFname + "_" + matches[2]
+			}
+		}
+	case 86:
+		if vmIdRegexp.MatchString(s.prevline) {
+			matches = vmIdRegexp.FindStringSubmatch(s.prevline)
+			if len(matches) > 1 {
+				// get VM file ID
+				vminfo.vmFileid = matches[1]
+			}
+		}
+	}
 }
 
 // This regular expression, *if immediately followed by a LF+FF*, indicates
@@ -169,6 +233,12 @@ func (s *scanner) emitLineAndPage() {
 		s.endJob(false)
 	} else {
 		s.handler.PageBreak()
+		// If this is VM we skip three lines at the top for alignment
+		if s.isVM {
+			s.emitLine(true)
+			s.emitLine(true)
+			s.emitLine(true)
+		}
 	}
 }
 
@@ -191,12 +261,35 @@ func (s *scanner) endJob(wasTimeout bool) {
 			// Should be the job name
 			jobinfo = jobinfo + "_" + matches[3]
 		}
+	} else {
+		// We'll try to populate VM/370 job info.
+		if s.isVM {
+			if vminfo.vmFileid != "" {
+				// Add file ID
+				jobinfo = vminfo.vmFileid + "_"
+			}
+			if vminfo.vmUID != "" {
+				// Add user ID
+				jobinfo = jobinfo + vminfo.vmUID + "_"
+			}
+			if vminfo.vmFname != "" {
+				// Add file name
+				jobinfo = jobinfo + vminfo.vmFname
+			}
+		}
 	}
 
 	s.handler.EndOfJob(jobinfo)
 	s.prevline = ""
 	s.pos = 0
 	s.newjob = true
+	s.isVM = false
+	s.linenum = 0
+	s.nextfunc = getNextByte
+
+	vminfo.vmUID = ""
+	vminfo.vmFname = ""
+	vminfo.vmFileid = ""
 
 	// No timeout for the next read awaiting beginning of the next job
 	if err := s.conn.SetReadDeadline(time.Time{}); err != nil {
