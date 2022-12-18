@@ -46,6 +46,14 @@ var useASA = flag.Bool("asa", false, "When using -printfile, file has ASA "+
 var trace = flag.Bool("trace", false, "enable trace logging")
 var displayVersion = flag.Bool("version", false, "display version and quit")
 
+var FilenameFlags = struct {
+	useLocaltime  *bool
+	altDateformat *bool
+}{
+	useLocaltime:  flag.Bool("localtime", false, "use localtime in file name"),
+	altDateformat: flag.Bool("altdate", false, "use alternative date format (06-01-02_03.04.05) in file name"),
+}
+
 func main() {
 	flag.Parse()
 

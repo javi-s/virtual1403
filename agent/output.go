@@ -78,11 +78,28 @@ func (o *pdfOutputHandler) EndOfJob(jobinfo string) {
 		}
 	}()
 
-	if jobinfo != "" {
-		jobinfo = jobinfo + "-"
+	var dateformat, separator string
+	if *FilenameFlags.altDateformat {
+		dateformat = "06-01-02_15.04.05"
+		separator = "_"
+	} else {
+		dateformat = "20060102T030405"
+		separator = "-"
 	}
-	jobfilename := fmt.Sprintf("v1403-%s%s.pdf", jobinfo,
-		time.Now().UTC().Format("20060102T030405"))
+
+	if jobinfo != "" {
+		jobinfo = jobinfo + separator
+	}
+
+	var jobfilename string
+	if *FilenameFlags.useLocaltime {
+		jobfilename = fmt.Sprintf("v1403%s%s%s.pdf", separator, jobinfo,
+			time.Now().Format(dateformat))
+	} else {
+		jobfilename = fmt.Sprintf("v1403%s%s%s.pdf", separator, jobinfo,
+			time.Now().UTC().Format(dateformat))
+	}
+
 	filename := filepath.Join(o.outputDir, jobfilename)
 
 	f, err := os.Create(filename)
