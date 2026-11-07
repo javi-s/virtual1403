@@ -50,6 +50,8 @@ type vmJobinfo struct {
 	vmFileid string
 }
 
+const defaultJobTimeout = 500 * time.Millisecond
+
 // Scan will read from a net.Conn, conn, which should be sent data from
 // Hercules printer output. It will output lines (trimmed to 132 characters
 // if necessary) and page breaks and identify the end of jobs in the printer
@@ -58,7 +60,7 @@ type vmJobinfo struct {
 // This function exists for backwards-compatibility and just calls
 // ScanWithLogTag with the tag "default"
 func Scan(conn net.Conn, handler PrinterHandler, trace bool) error {
-	return ScanWithLogTag(conn, handler, trace, "default")
+	return ScanWithLogTag(conn, handler, trace, "default", defaultJobTimeout)
 }
 
 // Scan will read from a net.Conn, conn, which should be sent data from
@@ -66,7 +68,7 @@ func Scan(conn net.Conn, handler PrinterHandler, trace bool) error {
 // if necessary) and page breaks and identify the end of jobs in the printer
 // data stream.
 func ScanWithLogTag(conn net.Conn, handler PrinterHandler, trace bool,
-	tag string) error {
+	tag string, jobTimeout time.Duration) error {
 
 	var s scanner
 	s.conn = conn
